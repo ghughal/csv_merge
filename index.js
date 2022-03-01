@@ -1,34 +1,37 @@
 const fs = require('fs');
 const path = require('path');
 const csvReader = require('csv-reader');
+const createCsvWriter = require('csv-writer').createArrayCsvWriter;
 
 const allCsv = [];
+let merged = [];
 
 // main
-readFiles(filename => {
-    readCsv(filename, () => merge());
-}, err => {
-    throw err;
-});
+readFiles()
+    .then(fileNames => readAllCsvs(fileNames))
+    .then(() => merge())
+    .then(() => writeToMasterFile())
+    .then(() => console.log("DONE"))
+    .catch(error => console.error("Error: " + error));
 
-function readFiles(onFile, onError) {
+function readFiles() {
     const directoryPath = path.join(__dirname, 'input/');
-    fs.readdir(directoryPath, (err, filenames) => {
-        if (err) {
-            onError(err);
-            return;
-        }
-        filenames.forEach(filename => onFile(filename));
-    });
+    return fs.promises.readdir(directoryPath);
 }
 
-function readCsv(fileName, onFileRead) {
+function readAllCsvs(fileNames) {
+    const promises = [];
+    fileNames.forEach(fileName => promises.push(readCsv(fileName)));
+    return Promise.all(promises);
+}
+
+function readCsv(fileName) {
     console.log("Reading csv file: " + fileName);
 
     const csv = {};
     csv.fileName = fileName;
-
     const students = [];
+
     const inputStream = fs.createReadStream('input/' + fileName, 'utf8');
 
     inputStream
@@ -45,14 +48,61 @@ function readCsv(fileName, onFileRead) {
         .on('end', () => {
             csv.students = students;
             allCsv.push(csv);
-            onFileRead();
             console.log("Done readng file: " + fileName);
         })
+        .on('error', () => {
+            console.error("Erro reading file: " + fileName);
+            process.exit(1);
+        });
+
+    // give it a second to read the data
+    return new Promise((resolve) => setTimeout(resolve, 1000));
 }
 
 function merge() {
     console.log("Merging...");
 
-    // console.log("all csv:" + JSON.stringify(allCsv));
-    // console.log("all csv:" + allCsv);
+    let classRow = ["Last Name", "First Name", "Email Address"];
+    let studentRows = [];
+    let fill = 0;
+
+    for (const csv of allCsv) {
+        const index = csv.class.findIndex(element => element.startsWith("L"));
+        const classNames = csv.class.slice(index);
+        classRow = classRow.concat(classNames);
+        let numberOfClasses = 0;
+
+        for (const student of csv.students) {
+            let studentRow = [];
+            studentRow.push(student[0]); // last name
+            studentRow.push(student[1]); // first name
+            studentRow.push(student[2]); // email address
+
+            for (let i = 0; i < fill; i++) {
+                studentRow.push("");
+            }
+
+            const grades = student.slice(index);
+            numberOfClasses = grades.length;
+            studentRow = studentRow.concat(grades);
+            studentRows.push(studentRow);
+        }
+
+        fill = fill + numberOfClasses;
+    }
+
+    merged.push(classRow);
+    studentRows.forEach(row => merged.push(row));
+    // console.log(JSON.stringify(merged));
+}
+
+function writeToMasterFile() {
+    const outputFile = "output/master.csv";
+    console.log("Writing to master file: " + outputFile);
+
+    const csvWriter = createCsvWriter({
+        path: outputFile
+    });
+
+    return csvWriter.writeRecords(merged);
 }
